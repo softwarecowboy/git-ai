@@ -58,6 +58,13 @@ pub fn log_performance_target_if_violated(
         "within_target": within_target,
     });
 
+    if std::env::var("GIT_AI_DEBUG_PERFORMANCE")
+        .map(|v| v.parse::<u32>().unwrap_or(0) >= 2)
+        .unwrap_or(false)
+    {
+        println!("[git-ai (perf-json)] {}", perf_json);
+    }
+
     tracing::debug!(%perf_json, "performance");
 
     if !within_target {
@@ -112,6 +119,14 @@ pub fn log_performance_for_checkpoint(
         "checkpoint_kind": checkpoint_kind.to_string(),
         "within_target": within_target,
     });
+
+    if std::env::var("GIT_AI_DEBUG_PERFORMANCE")
+        .map(|v| v.parse::<u32>().unwrap_or(0) >= 2)
+        .unwrap_or(false)
+    {
+        println!("[git-ai (perf-json)] {}", perf_json);
+    }
+
     tracing::debug!(%perf_json, "performance");
 
     if !within_target {

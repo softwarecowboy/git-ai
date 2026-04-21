@@ -73,13 +73,13 @@ impl BenchDaemon {
         };
         let mut ready = false;
         for _ in 0..200 {
-            if send_control_request_with_timeout(&control_socket, &probe, Duration::from_millis(25))
+            if send_control_request_with_timeout(&control_socket, &probe, Duration::from_millis(10))
                 .is_ok()
             {
                 ready = true;
                 break;
             }
-            std::thread::sleep(Duration::from_millis(25));
+            std::thread::sleep(Duration::from_millis(10));
         }
         assert!(ready, "bench daemon did not become ready within 5s");
 

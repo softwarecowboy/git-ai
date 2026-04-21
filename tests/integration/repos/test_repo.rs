@@ -232,7 +232,7 @@ impl DaemonProcess {
                     last_status_error = Some(error.to_string());
                 }
             }
-            thread::sleep(Duration::from_millis(25));
+            thread::sleep(Duration::from_millis(10));
         }
 
         let stderr_tail = self.read_stderr_tail();
@@ -302,7 +302,7 @@ impl DaemonProcess {
             if latest_seq > baseline_seq {
                 return Ok(());
             }
-            thread::sleep(Duration::from_millis(25));
+            thread::sleep(Duration::from_millis(10));
         }
 
         Err(format!(
@@ -357,6 +357,10 @@ impl DaemonProcess {
 
         #[cfg(not(unix))]
         {
+            // Give the daemon a moment to exit gracefully after the Shutdown request.
+            // This reduces mandatory file lock issues (Access Denied) during cleanup.
+            thread::sleep(Duration::from_millis(200));
+
             let _ = Command::new("taskkill")
                 .args(["/PID", &self.pid.to_string(), "/T", "/F"])
                 .stdout(Stdio::null())
@@ -379,12 +383,15 @@ fn configure_test_home_env(command: &mut Command, test_home: &Path) {
     // Without this, git internals (which call `git` sub-processes via PATH) will
     // hit the installed release git-ai binary, which has async_mode=true and
     // spawns a background daemon for every invocation — causing a process storm.
-    #[cfg(not(windows))]
+    let sep = if cfg!(windows) { ';' } else { ':' };
     if let Ok(path) = std::env::var("PATH") {
         let sanitized: Vec<&str> = path
-            .split(':')
+            .split(sep)
             .filter(|dir| {
-                let git_path = std::path::Path::new(dir).join("git");
+                let mut git_path = std::path::Path::new(dir).join("git");
+                if cfg!(windows) {
+                    git_path.set_extension("exe");
+                }
                 if git_path.is_file() || git_path.is_symlink() {
                     // Shell-script wrapper containing "git-ai"
                     if let Ok(contents) = fs::read_to_string(&git_path)
@@ -408,7 +415,7 @@ fn configure_test_home_env(command: &mut Command, test_home: &Path) {
                 true
             })
             .collect();
-        command.env("PATH", sanitized.join(":"));
+        command.env("PATH", sanitized.join(&sep.to_string()));
     }
     #[cfg(windows)]
     {
@@ -2689,30 +2696,30 @@ impl Drop for TestRepo {
                 ])
                 .output();
 
-            let _ = remove_dir_all_with_retry(&self.path, 80, Duration::from_millis(50));
-            let _ = remove_dir_all_with_retry(base_path, 80, Duration::from_millis(50));
+            let _ = remove_dir_all_with_retry(&self.path, 400, Duration::from_millis(10));
+            let _ = remove_dir_all_with_retry(base_path, 400, Duration::from_millis(10));
 
             if let Some(base_db_path) = &self._base_test_db_path
                 && remove_test_db
             {
-                let _ = remove_dir_all_with_retry(base_db_path, 40, Duration::from_millis(25));
+                let _ = remove_dir_all_with_retry(base_db_path, 400, Duration::from_millis(10));
             }
 
             if remove_test_db {
                 let _ =
-                    remove_dir_all_with_retry(&self.test_db_path, 40, Duration::from_millis(25));
+                    remove_dir_all_with_retry(&self.test_db_path, 400, Duration::from_millis(10));
             }
-            let _ = remove_dir_all_with_retry(&self.test_home, 40, Duration::from_millis(25));
+            let _ = remove_dir_all_with_retry(&self.test_home, 400, Duration::from_millis(10));
             return;
         }
 
-        remove_dir_all_with_retry(&self.path, 80, Duration::from_millis(50))
+        remove_dir_all_with_retry(&self.path, 400, Duration::from_millis(10))
             .expect("failed to remove test repo");
         // Also clean up the test database directory (may not exist if no DB operations were done)
         if remove_test_db {
-            let _ = remove_dir_all_with_retry(&self.test_db_path, 40, Duration::from_millis(25));
+            let _ = remove_dir_all_with_retry(&self.test_db_path, 400, Duration::from_millis(10));
         }
-        let _ = remove_dir_all_with_retry(&self.test_home, 40, Duration::from_millis(25));
+        let _ = remove_dir_all_with_retry(&self.test_home, 400, Duration::from_millis(10));
     }
 }
 
@@ -2812,6 +2819,39 @@ static COMPILED_BINARY: OnceLock<PathBuf> = OnceLock::new();
 /// Find the real git binary by directly probing candidate paths — without reading
 /// any HOME-derived config. Called once during process HOME isolation setup.
 fn find_real_git_by_probe() -> String {
+    #[cfg(windows)]
+    {
+        // On Windows, use where.exe to find all 'git' instances and probe each one.
+        // This is more robust than hardcoded paths for varied installations.
+        if let Ok(output) = Command::new("where.exe").arg("git").output() {
+            let out = String::from_utf8_lossy(&output.stdout);
+            for line in out.lines() {
+                let trimmed = line.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                let p = Path::new(trimmed);
+                if git_ai::config::is_real_git_candidate(p) {
+                    return trimmed.to_string();
+                }
+            }
+        }
+
+        // Fallback candidates if where.exe fails
+        let candidates: &[&str] = &[
+            r"C:\Program Files\Git\bin\git.exe",
+            r"C:\Program Files\Git\cmd\git.exe",
+            r"C:\Program Files (x86)\Git\bin\git.exe",
+            r"C:\Program Files (x86)\Git\cmd\git.exe",
+        ];
+        for c in candidates {
+            let p = Path::new(c);
+            if git_ai::config::is_real_git_candidate(p) {
+                return c.to_string();
+            }
+        }
+    }
+
     // Read HOME *before* we replace it with the isolated dir.
     let local_git = std::env::var("HOME")
         .map(|h| format!("{h}/.local/bin/git"))
@@ -2892,12 +2932,15 @@ fn ensure_isolated_process_home() {
             // (e.g., template repo init, bare repo init, worktree setup), preventing
             // git internals from resolving `git` via PATH to the installed git-ai
             // release binary (which has async_mode=true and would spawn daemons).
-            #[cfg(not(windows))]
+            let sep = if cfg!(windows) { ';' } else { ':' };
             if let Ok(path) = std::env::var("PATH") {
                 let sanitized = path
-                    .split(':')
+                    .split(sep)
                     .filter(|dir| {
-                        let git_path = std::path::Path::new(dir).join("git");
+                        let mut git_path = std::path::Path::new(dir).join("git");
+                        if cfg!(windows) {
+                            git_path.set_extension("exe");
+                        }
                         if git_path.is_file() || git_path.is_symlink() {
                             if let Ok(contents) = fs::read_to_string(&git_path)
                                 && contents.contains("git-ai")
@@ -2918,7 +2961,7 @@ fn ensure_isolated_process_home() {
                         true
                     })
                     .collect::<Vec<_>>()
-                    .join(":");
+                    .join(&sep.to_string());
                 std::env::set_var("PATH", sanitized);
             }
         }
@@ -2927,9 +2970,12 @@ fn ensure_isolated_process_home() {
 }
 
 pub(crate) fn real_git_executable() -> &'static str {
-    // Ensure HOME is isolated before Config::get() caches HOME-derived paths.
-    ensure_isolated_process_home();
-    git_ai::config::Config::get().git_cmd()
+    static REAL_GIT: OnceLock<String> = OnceLock::new();
+    REAL_GIT.get_or_init(|| {
+        // Ensure HOME is isolated before Config::get() caches HOME-derived paths.
+        ensure_isolated_process_home();
+        git_ai::config::Config::get().git_cmd().to_string()
+    })
 }
 
 /// Create a pre-initialized template repo (cached across all tests in the process).
@@ -2989,7 +3035,17 @@ fn init_bare_template_repo() -> PathBuf {
     path
 }
 
-fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
+pub(crate) fn sync_dir(src: &Path, dst: &Path) -> std::io::Result<()> {
+    if dst.exists() {
+        remove_dir_all_with_retry(dst, 400, Duration::from_millis(10))?;
+    }
+    copy_dir_recursive(src, dst)
+}
+
+pub(crate) fn copy_dir_recursive(
+    src: &std::path::Path,
+    dst: &std::path::Path,
+) -> std::io::Result<()> {
     fs::create_dir_all(dst)?;
     for entry in fs::read_dir(src)? {
         let entry = entry?;

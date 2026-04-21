@@ -18,9 +18,25 @@ pub fn handle_debug(args: &[String]) {
     }
 
     if !args.is_empty() {
-        eprintln!("Error: unknown debug argument(s): {}", args.join(" "));
-        print_debug_help();
-        std::process::exit(1);
+        match args[0].as_str() {
+            "exclude-temp-from-av" => {
+                #[cfg(windows)]
+                {
+                    handle_exclude_temp_from_av();
+                    return;
+                }
+                #[cfg(not(windows))]
+                {
+                    eprintln!("Error: this command is only available on Windows.");
+                    std::process::exit(1);
+                }
+            }
+            _ => {
+                eprintln!("Error: unknown debug argument(s): {}", args.join(" "));
+                print_debug_help();
+                std::process::exit(1);
+            }
+        }
     }
 
     let report = build_debug_report();
@@ -33,6 +49,29 @@ fn print_debug_help() {
     eprintln!("Usage:");
     eprintln!("  git-ai debug");
     eprintln!("  git-ai debug --help");
+    #[cfg(windows)]
+    eprintln!("  git-ai debug exclude-temp-from-av");
+}
+
+#[cfg(windows)]
+fn handle_exclude_temp_from_av() {
+    let temp_dir = std::env::temp_dir();
+    println!(
+        "Attempting to exclude temporary directory from Windows Defender: {}",
+        temp_dir.display()
+    );
+    match crate::utils::exclude_path_from_windows_defender(&temp_dir) {
+        Ok(()) => {
+            println!("Successfully excluded temporary directory from Windows Defender.");
+        }
+        Err(e) => {
+            eprintln!("Error: {}", e);
+            eprintln!();
+            eprintln!("Note: This command requires administrative privileges to succeed.");
+            eprintln!("Try running your terminal (PowerShell or CMD) as Administrator.");
+            std::process::exit(1);
+        }
+    }
 }
 
 fn build_debug_report() -> String {

@@ -1088,3 +1088,26 @@ mod tests {
         assert_eq!(CREATE_BREAKAWAY_FROM_JOB, 0x01000000);
     }
 }
+
+/// On Windows, attempt to exclude a path from Windows Defender AV scanning.
+/// Requires administrative privileges to succeed.
+#[cfg(windows)]
+pub fn exclude_path_from_windows_defender(path: &std::path::Path) -> Result<(), String> {
+    let path_str = path.to_string_lossy();
+    let script = format!("Add-MpPreference -ExclusionPath '{}'", path_str);
+
+    let output = Command::new("powershell.exe")
+        .args(["-NoProfile", "-Command", &script])
+        .output()
+        .map_err(|e| format!("failed to spawn powershell: {}", e))?;
+
+    if output.status.success() {
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        Err(format!(
+            "failed to exclude path from Windows Defender (permission denied?): {}",
+            stderr.trim()
+        ))
+    }
+}

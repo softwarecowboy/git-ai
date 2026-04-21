@@ -127,7 +127,7 @@ fn wait_for_daemon_sockets(repo: &TestRepo) {
         {
             return;
         }
-        thread::sleep(Duration::from_millis(25));
+        thread::sleep(Duration::from_millis(10));
     }
     panic!(
         "daemon sockets did not become ready: control={}, trace={}",
@@ -156,7 +156,7 @@ fn wait_for_daemon_latest_seq(repo: &TestRepo, min_seq: u64) {
         if latest_seq >= min_seq {
             return;
         }
-        thread::sleep(Duration::from_millis(25));
+        thread::sleep(Duration::from_millis(10));
     }
     panic!(
         "daemon did not observe traced command for {}",

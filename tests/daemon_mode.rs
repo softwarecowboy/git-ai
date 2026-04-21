@@ -1040,7 +1040,7 @@ fn daemon_start_spawns_detached_run_process() {
                 break;
             }
             _ => {
-                thread::sleep(Duration::from_millis(25));
+                thread::sleep(Duration::from_millis(10));
             }
         }
     }

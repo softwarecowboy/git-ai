@@ -1,5 +1,5 @@
 use crate::repos::test_file::ExpectedLineExt;
-use crate::repos::test_repo::TestRepo;
+use crate::repos::test_repo::{TestRepo, sync_dir};
 use std::fs;
 use std::time::Instant;
 
@@ -1566,16 +1566,7 @@ fn benchmark_monorepo_rebase() {
             println!("Restoring repo from cache: {}", cd);
             let restore_start = Instant::now();
             // Copy cached working tree + .git into the test repo
-            let status = std::process::Command::new("rsync")
-                .args([
-                    "-a",
-                    "--delete",
-                    &format!("{}/", cd),
-                    &format!("{}/", repo.path().display()),
-                ])
-                .status()
-                .expect("rsync failed");
-            assert!(status.success(), "rsync restore from cache failed");
+            sync_dir(cache_path, repo.path()).expect("sync_dir restore from cache failed");
             println!(
                 "Restored from cache in {:.1}s",
                 restore_start.elapsed().as_secs_f64()
@@ -1811,16 +1802,7 @@ fn benchmark_monorepo_rebase() {
                 println!("Saving repo to cache: {}", cd);
                 let save_start = Instant::now();
                 fs::create_dir_all(cache_path).expect("create cache dir");
-                let status = std::process::Command::new("rsync")
-                    .args([
-                        "-a",
-                        "--delete",
-                        &format!("{}/", repo.path().display()),
-                        &format!("{}/", cd),
-                    ])
-                    .status()
-                    .expect("rsync failed");
-                assert!(status.success(), "rsync save to cache failed");
+                sync_dir(repo.path(), cache_path).expect("sync_dir save to cache failed");
                 println!(
                     "Saved to cache in {:.1}s",
                     save_start.elapsed().as_secs_f64()
@@ -1987,16 +1969,7 @@ fn benchmark_monorepo_graphite_rebase() {
         if cache_path.join(".git").exists() {
             println!("Restoring repo from cache: {}", cd);
             let restore_start = Instant::now();
-            let status = std::process::Command::new("rsync")
-                .args([
-                    "-a",
-                    "--delete",
-                    &format!("{}/", cd),
-                    &format!("{}/", repo.path().display()),
-                ])
-                .status()
-                .expect("rsync failed");
-            assert!(status.success(), "rsync restore from cache failed");
+            sync_dir(cache_path, repo.path()).expect("sync_dir restore from cache failed");
             println!(
                 "Restored from cache in {:.1}s",
                 restore_start.elapsed().as_secs_f64()
@@ -2181,16 +2154,7 @@ fn benchmark_monorepo_graphite_rebase() {
             if !cache_path.join(".git").exists() {
                 println!("Saving repo to cache: {}", cd);
                 fs::create_dir_all(cache_path).expect("create cache dir");
-                let status = std::process::Command::new("rsync")
-                    .args([
-                        "-a",
-                        "--delete",
-                        &format!("{}/", repo.path().display()),
-                        &format!("{}/", cd),
-                    ])
-                    .status()
-                    .expect("rsync failed");
-                assert!(status.success(), "rsync save to cache failed");
+                sync_dir(repo.path(), cache_path).expect("sync_dir save to cache failed");
             }
         }
 

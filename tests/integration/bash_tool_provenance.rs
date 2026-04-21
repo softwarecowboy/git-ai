@@ -18,12 +18,17 @@ use git_ai::commands::checkpoint_agent::bash_tool::{
 };
 use std::fs;
 use std::process::Command;
+use std::sync::OnceLock;
 use std::thread;
 use std::time::Duration;
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/// Cache for Git's Unix utility paths on Windows.
+#[cfg(windows)]
+static GIT_UNIX_PATHS: OnceLock<Option<(std::path::PathBuf, std::path::PathBuf)>> = OnceLock::new();
 
 /// Write a file into the test repo, creating parent directories as needed.
 fn write_file(repo: &TestRepo, rel_path: &str, contents: &str) {
@@ -50,7 +55,59 @@ fn repo_root(repo: &TestRepo) -> std::path::PathBuf {
 
 /// Run a bash command in the repo and assert it succeeds.
 fn run_bash(repo: &TestRepo, program: &str, args: &[&str]) -> std::process::Output {
-    let output = Command::new(program)
+    let mut command = Command::new(program);
+
+    #[cfg(windows)]
+    {
+        // On Windows, many tests rely on Unix utilities (sh, touch, cp, etc) provided by Git.
+        // If these aren't in the system PATH, we try to find them in the Git installation.
+        let is_unix_tool = matches!(
+            program,
+            "sh" | "touch"
+                | "cp"
+                | "mv"
+                | "rm"
+                | "mkdir"
+                | "tar"
+                | "cat"
+                | "ls"
+                | "grep"
+                | "wc"
+                | "head"
+                | "diff"
+                | "sed"
+                | "printf"
+                | "tee"
+        );
+        if is_unix_tool {
+            let paths = GIT_UNIX_PATHS.get_or_init(|| {
+                if let Ok(git_output) = Command::new("where.exe").arg("git").output() {
+                    let git_out = String::from_utf8_lossy(&git_output.stdout);
+                    if let Some(first_line) = git_out.lines().next() {
+                        let git_exe = std::path::Path::new(first_line);
+                        if let Some(git_cmd_dir) = git_exe.parent() {
+                            if let Some(git_root) = git_cmd_dir.parent() {
+                                return Some((
+                                    git_root.join("usr").join("bin"),
+                                    git_root.join("bin"),
+                                ));
+                            }
+                        }
+                    }
+                }
+                None
+            });
+
+            if let Some((usr_bin, bin)) = paths {
+                if let Ok(old_path) = std::env::var("PATH") {
+                    let new_path = format!("{};{};{}", usr_bin.display(), bin.display(), old_path);
+                    command.env("PATH", new_path);
+                }
+            }
+        }
+    }
+
+    let output = command
         .args(args)
         .current_dir(repo.path())
         .output()

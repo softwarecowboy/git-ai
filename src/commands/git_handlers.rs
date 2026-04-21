@@ -701,7 +701,7 @@ fn maybe_show_async_post_commit_stats(parsed: &ParsedGitInvocation, repo: &Repos
     };
 
     // Poll for the authorship note the daemon should be producing.
-    let poll_interval = std::time::Duration::from_millis(25);
+    let poll_interval = std::time::Duration::from_millis(10);
     let start = std::time::Instant::now();
     let note_found = loop {
         if show_authorship_note(repo, &commit_sha).is_some() {

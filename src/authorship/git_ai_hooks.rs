@@ -10,7 +10,7 @@ use std::os::windows::process::CommandExt;
 
 const POST_NOTES_UPDATED_HOOK: &str = "post_notes_updated";
 const HOOK_WAIT_TIMEOUT: Duration = Duration::from_secs(3);
-const HOOK_POLL_INTERVAL: Duration = Duration::from_millis(25);
+const HOOK_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
 struct RepoHookContext {
     repo_url: String,
